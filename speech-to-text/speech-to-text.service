@@ -1,0 +1,15 @@
+[Unit]
+Description=Speech-to-Text Engine
+After=graphical-session.target pipewire.service
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tyrel/projects/speach-to-text/speech-to-text
+ExecStart=/home/tyrel/projects/speach-to-text/speech-to-text/.venv/bin/python /home/tyrel/projects/speach-to-text/speech-to-text/main.py
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target

@@ -67,6 +67,25 @@ Edit `config.json` to customize:
 - If xdotool doesn't work, ensure you're using X11 (not Wayland)
 - If transcription is inaccurate, try a larger Whisper model
 
+## Run as a systemd user service
+
+1. Copy the unit file:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp speech-to-text.service ~/.config/systemd/user/
+   ```
+
+2. Reload and enable:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now speech-to-text.service
+   ```
+
+3. Check logs:
+   ```bash
+   journalctl --user -u speech-to-text.service -f
+   ```
+
 ## License
 
 MIT
