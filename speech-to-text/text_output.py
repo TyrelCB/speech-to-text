@@ -68,8 +68,10 @@ class TextOutput:
         if text and text[-1] not in '.!?':
             text += '.'
 
-        # Add space after punctuation if needed
-        # This is a simplified version - in practice, you'd want more sophisticated punctuation handling
+        # Add a trailing separator so consecutive transcriptions do not run together.
+        if text:
+            text += ' '
+
         return text
 
     def _send_keystrokes(self, text: str):

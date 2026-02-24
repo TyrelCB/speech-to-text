@@ -62,3 +62,18 @@ def test_clearmodifiers_flag_present():
 
     cmd = mock_run.call_args[0][0]
     assert '--clearmodifiers' in cmd
+
+
+def test_send_text_adds_trailing_space_separator():
+    """Typed text should end with a space to separate consecutive transcriptions."""
+    from text_output import TextOutput
+
+    config = {'xdotool_available': True}
+    to = TextOutput(config)
+
+    with patch('subprocess.run') as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        to.send_text("hello world")
+
+    cmd = mock_run.call_args[0][0]
+    assert cmd[-1] == "Hello world. "
