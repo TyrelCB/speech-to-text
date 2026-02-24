@@ -161,6 +161,7 @@ def main():
 
     # Connect components
     audio_capture.set_callback(speech_recognition.process_audio)
+    audio_capture.set_level_callback(overlay.update_audio_level)
     speech_recognition.set_callback(text_output.send_text)
     speech_recognition.set_overlay_callback(overlay.update_state)
 

@@ -63,3 +63,13 @@ def test_stop_event_used_in_process_audio():
     import inspect
     src = inspect.getsource(audio_capture.AudioCapture._process_audio)
     assert '_stop_event' in src, "_process_audio must use self._stop_event for clean shutdown"
+
+
+def test_calculate_audio_level_normalized():
+    """_calculate_audio_level should return a 0.0-1.0 normalized value."""
+    ac = _make_capture()
+
+    assert ac._calculate_audio_level(b"") == 0.0
+    assert ac._calculate_audio_level((0).to_bytes(2, "little", signed=True)) == 0.0
+    level = ac._calculate_audio_level((32767).to_bytes(2, "little", signed=True))
+    assert 0.99 <= level <= 1.0

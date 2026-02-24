@@ -35,6 +35,10 @@ class Overlay:
         self.timeout_thread = None
         self.update_callback = None
         self.xdotool_available = config.get('xdotool_available', False)
+        self.canvas = None
+        self.meter_fill = None
+        self._audio_level = 0.0
+        self._last_activity = 0.0
 
     def create_overlay(self):
         """Create the overlay window."""
@@ -49,15 +53,30 @@ class Overlay:
         self.root.attributes('-alpha', 0.8)  # Semi-transparent
         self.root.configure(bg='black')
 
-        # Create label for text
+        # Build a compact text + meter layout.
+        content = tk.Frame(self.root, bg='black')
+        content.pack(padx=10, pady=8)
+
         self.label = ttk.Label(
-            self.root,
+            content,
             text="",
             foreground="white",
             background="black",
             font=("Helvetica", self.config.get('overlay_font_size', 16))
         )
-        self.label.pack(expand=True)
+        self.label.pack()
+
+        self.canvas = tk.Canvas(
+            content,
+            width=220,
+            height=12,
+            bg='black',
+            highlightthickness=0,
+            bd=0,
+        )
+        self.canvas.pack(pady=(6, 0))
+        self.canvas.create_rectangle(0, 0, 220, 12, fill="#202020", outline="")
+        self.meter_fill = self.canvas.create_rectangle(0, 0, 0, 12, fill="#23c55e", outline="")
 
         # Set initial position
         self.update_position()
@@ -108,6 +127,7 @@ class Overlay:
         if not self.root:
             return
         self.label.config(text=state)
+        self._mark_activity()
         with self._visibility_lock:
             already_visible = self.is_visible
             if not already_visible:
@@ -115,6 +135,35 @@ class Overlay:
         if not already_visible:
             self.update_position()
             self.root.deiconify()
+        self._start_timeout()
+
+    def update_audio_level(self, level: float):
+        """Thread-safe: schedule a meter update on the Tk event loop."""
+        if self.root and self.is_running:
+            clamped = max(0.0, min(1.0, level))
+            self.root.after(0, self._do_update_audio_level, clamped)
+
+    def _do_update_audio_level(self, level: float):
+        """Must only be called from the Tk thread (via root.after)."""
+        if not self.root or self.canvas is None or self.meter_fill is None:
+            return
+
+        # Smooth quick spikes so the meter is readable.
+        self._audio_level = (self._audio_level * 0.7) + (level * 0.3)
+        width = int(220 * self._audio_level)
+        self.canvas.coords(self.meter_fill, 0, 0, width, 12)
+
+        if level > 0.01:
+            if not self.label.cget("text"):
+                self.label.config(text="Listening...")
+            self._mark_activity()
+            with self._visibility_lock:
+                already_visible = self.is_visible
+                if not already_visible:
+                    self.is_visible = True
+            if not already_visible:
+                self.update_position()
+                self.root.deiconify()
             self._start_timeout()
 
     def _start_timeout(self):
@@ -126,16 +175,29 @@ class Overlay:
         self.timeout_thread.start()
 
     def _timeout_handler(self):
-        """Sleep then schedule hide back on the Tk thread."""
-        time.sleep(self.overlay_timeout)
-        if self.root and self.is_running:
-            self.root.after(0, self._do_hide)
+        """Hide overlay only after inactivity for overlay_timeout seconds."""
+        while self.root and self.is_running:
+            time.sleep(0.1)
+            with self._visibility_lock:
+                visible = self.is_visible
+            if not visible:
+                return
+            if (time.monotonic() - self._last_activity) >= self.overlay_timeout:
+                self.root.after(0, self._do_hide)
+                return
+
+    def _mark_activity(self):
+        """Track when overlay was last updated."""
+        self._last_activity = time.monotonic()
 
     def _do_hide(self):
         """Must only be called from the Tk thread (via root.after)."""
         with self._visibility_lock:
             if self.is_visible:
                 self.is_visible = False
+                self._audio_level = 0.0
+                if self.canvas is not None and self.meter_fill is not None:
+                    self.canvas.coords(self.meter_fill, 0, 0, 0, 12)
                 self.root.withdraw()
 
     def start(self):

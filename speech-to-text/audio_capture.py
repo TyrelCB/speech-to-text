@@ -52,6 +52,7 @@ class AudioCapture:
         self.hotkey_pressed = False
         self.xlib_available = xlib_available
         self.evdev_available = evdev_available
+        self.level_callback: Optional[Callable[[float], None]] = None
         self.setup_hotkey()
 
     def setup_hotkey(self):
@@ -330,6 +331,8 @@ class AudioCapture:
             while not self._stop_event.is_set() and self.process:
                 data = self.process.stdout.read(self.audio_buffer_size)
                 if data:
+                    if self.level_callback:
+                        self.level_callback(self._calculate_audio_level(data))
                     buffer.extend(data)
 
                     if len(buffer) >= chunk_bytes:
@@ -348,6 +351,19 @@ class AudioCapture:
             if buffer and self.callback:
                 logger.info("Flushing %d bytes of remaining audio", len(buffer))
                 self.callback(bytes(buffer))
+            if self.level_callback:
+                self.level_callback(0.0)
+
+    def _calculate_audio_level(self, data: bytes) -> float:
+        """Return normalized peak level (0.0-1.0) from 16-bit PCM audio."""
+        if not data:
+            return 0.0
+        try:
+            samples = memoryview(data).cast('h')
+            peak = max(abs(sample) for sample in samples)
+            return min(1.0, peak / 32768.0)
+        except Exception:
+            return 0.0
 
     def stop_capture(self):
         """Stop audio capture."""
@@ -383,3 +399,7 @@ class AudioCapture:
     def set_callback(self, callback: Callable):
         """Set callback function to be called with audio data."""
         self.callback = callback
+
+    def set_level_callback(self, callback: Callable[[float], None]):
+        """Set callback function to be called with normalized audio level."""
+        self.level_callback = callback
