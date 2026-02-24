@@ -1,0 +1,11 @@
+{
+  "hotkey": "Ctrl+Shift+M",
+  "model_size": "small",
+  "language": "en",
+  "audio_chunk_duration": 5,
+  "audio_sample_rate": 16000,
+  "audio_channels": 1,
+  "overlay_timeout": 3,
+  "overlay_font_size": 16,
+  "audio_buffer_size": 1024
+}

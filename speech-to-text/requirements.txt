@@ -1,0 +1,5 @@
+openai-whisper==20231106
+pyaudio==0.2.13
+python-xlib==0.31
+numpy==1.24.3
+torch
