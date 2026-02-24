@@ -7,6 +7,7 @@ This script initializes all components and starts the main event loop.
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -43,6 +44,31 @@ except ImportError as e:
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def _detect_display_server() -> str:
+    """Return 'wayland' or 'x11' based on the current session."""
+    session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+    if session_type == 'wayland':
+        return 'wayland'
+    if session_type == 'x11':
+        return 'x11'
+    # Fallback: check env vars directly
+    if os.environ.get('WAYLAND_DISPLAY'):
+        return 'wayland'
+    return 'x11'
+
+
+def _check_wtype() -> bool:
+    """Check if wtype is available (Wayland text output)."""
+    if shutil.which('wtype'):
+        logger.info("wtype is available")
+        return True
+    logger.warning(
+        "wtype not found. Text output will not work on Wayland. "
+        "Install with: sudo dnf install wtype"
+    )
+    return False
+
 
 def _check_xdotool() -> bool:
     """Check if xdotool is available on this system."""
@@ -108,8 +134,19 @@ def main():
         logger.error("Invalid configuration: %s", e)
         sys.exit(1)
 
-    # Single xdotool check shared by all components
-    config['xdotool_available'] = _check_xdotool()
+    # Detect display server and check available tools
+    display_server = _detect_display_server()
+    config['wayland'] = (display_server == 'wayland')
+    logger.info("Display server: %s", display_server)
+
+    if config['wayland']:
+        config['xdotool_available'] = False
+        config['wtype_available'] = _check_wtype()
+        if not config['wtype_available']:
+            logger.warning("Running on Wayland without wtype — text output disabled")
+    else:
+        config['xdotool_available'] = _check_xdotool()
+        config['wtype_available'] = False
 
     # Initialize components
     audio_capture = AudioCapture(config)

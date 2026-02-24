@@ -25,14 +25,20 @@ class TextOutput:
         self.config = config
         self.callback: Optional[Callable] = None
         self.last_text = ""
+        self.wayland = config.get('wayland', False)
         self.xdotool_available = config.get('xdotool_available', False)
+        self.wtype_available = config.get('wtype_available', False)
 
     def send_text(self, text: str):
-        """Send text to active window using xdotool."""
+        """Send text to the active window."""
         if not text:
             return
 
-        if not self.xdotool_available:
+        if self.wayland and not self.wtype_available:
+            logger.error("Cannot send text: wtype not available on Wayland")
+            return
+
+        if not self.wayland and not self.xdotool_available:
             logger.error("Cannot send text: xdotool not available")
             return
 
@@ -67,14 +73,20 @@ class TextOutput:
         return text
 
     def _send_keystrokes(self, text: str):
-        """Send text as keystrokes using xdotool."""
-        try:
-            subprocess.run(
-                ['xdotool', 'type', '--clearmodifiers', '--', text],
-                check=True
-            )
-        except subprocess.CalledProcessError as e:
-            logger.error("xdotool type failed: %s", e)
+        """Send text as keystrokes using wtype (Wayland) or xdotool (X11)."""
+        if self.wayland:
+            try:
+                subprocess.run(['wtype', '--', text], check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error("wtype failed: %s", e)
+        else:
+            try:
+                subprocess.run(
+                    ['xdotool', 'type', '--clearmodifiers', '--', text],
+                    check=True
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error("xdotool type failed: %s", e)
 
     def set_callback(self, callback: Callable):
         """Set callback function to be called with text to output."""

@@ -2,10 +2,11 @@
 Audio capture module for the Speech-to-Text Engine.
 
 This module handles microphone audio capture using PipeWire and detects hotkey events
-using X11 event listeners.
+using X11 (XGrabKey) on X11 sessions or evdev on Wayland sessions.
 """
 
 import logging
+import select
 import subprocess
 import threading
 import time
@@ -16,13 +17,20 @@ from typing import Callable, Optional
 # Add the current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import X11 libraries for hotkey detection
+# Optional X11 libraries (not needed on Wayland)
 try:
     from Xlib import X, display
     xlib_available = True
 except ImportError:
-    logging.warning("X11 libraries not available. Hotkey detection will not work.")
     xlib_available = False
+
+# Optional evdev library (needed on Wayland)
+try:
+    import evdev
+    from evdev import ecodes
+    evdev_available = True
+except ImportError:
+    evdev_available = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,48 +51,55 @@ class AudioCapture:
         self.hotkey_thread = None
         self.hotkey_pressed = False
         self.xlib_available = xlib_available
+        self.evdev_available = evdev_available
         self.setup_hotkey()
 
     def setup_hotkey(self):
-        """Set up hotkey detection using X11."""
-        if not self.xlib_available:
-            logger.warning("Hotkey detection is disabled due to missing X11 libraries")
-            return
-
-        try:
-            # Parse hotkey string
-            key_parts = self.hotkey.split('+')
-            self.modifier_keys = []
-            self.main_key = None
-
-            for part in key_parts:
-                if part == 'Ctrl':
-                    self.modifier_keys.append(X.ControlMask)
-                elif part == 'Shift':
-                    self.modifier_keys.append(X.ShiftMask)
-                elif part == 'Alt':
-                    self.modifier_keys.append(X.Mod1Mask)
-                elif part == 'Meta':
-                    self.modifier_keys.append(X.Mod4Mask)
-                else:
-                    self.main_key = part
-
-            if not self.main_key:
-                logger.error("Could not parse hotkey: %s", self.hotkey)
+        """Set up hotkey detection (evdev on Wayland, XGrabKey on X11)."""
+        if self.config.get('wayland'):
+            if not self.evdev_available:
+                logger.error(
+                    "evdev library not found. Install with: pip install evdev. "
+                    "Hotkey detection disabled."
+                )
                 return
+            target = self._detect_hotkey_evdev
+            logger.info("Hotkey detection set up for: %s (evdev/Wayland)", self.hotkey)
+        else:
+            if not self.xlib_available:
+                logger.warning("Hotkey detection disabled: X11 libraries not available")
+                return
+            # Parse X11 modifier masks
+            try:
+                key_parts = self.hotkey.split('+')
+                self.modifier_keys = []
+                self.main_key = None
+                for part in key_parts:
+                    if part == 'Ctrl':
+                        self.modifier_keys.append(X.ControlMask)
+                    elif part == 'Shift':
+                        self.modifier_keys.append(X.ShiftMask)
+                    elif part == 'Alt':
+                        self.modifier_keys.append(X.Mod1Mask)
+                    elif part == 'Meta':
+                        self.modifier_keys.append(X.Mod4Mask)
+                    else:
+                        self.main_key = part
+                if not self.main_key:
+                    logger.error("Could not parse hotkey: %s", self.hotkey)
+                    return
+            except Exception as e:
+                logger.error("Failed to parse hotkey: %s", e)
+                return
+            target = self._detect_hotkey_x11
+            logger.info("Hotkey detection set up for: %s (X11)", self.hotkey)
 
-            # Start hotkey detection thread
-            self.hotkey_thread = threading.Thread(target=self._detect_hotkey)
-            self.hotkey_thread.daemon = True
-            self.hotkey_thread.start()
+        self.hotkey_thread = threading.Thread(target=target)
+        self.hotkey_thread.daemon = True
+        self.hotkey_thread.start()
 
-            logger.info("Hotkey detection set up for: %s", self.hotkey)
-
-        except Exception as e:
-            logger.error("Failed to set up hotkey detection: %s", str(e))
-
-    def _detect_hotkey(self):
-        """Background thread to detect hotkey events using XGrabKey."""
+    def _detect_hotkey_x11(self):
+        """Background thread: X11 hotkey detection via XGrabKey."""
         if not self.xlib_available:
             logger.warning("Hotkey detection cannot run: X11 libraries not available")
             return
@@ -153,6 +168,110 @@ class AudioCapture:
 
         except Exception as e:
             logger.error("Hotkey detection failed: %s", str(e))
+
+    def _detect_hotkey_evdev(self):
+        """Background thread: Wayland hotkey detection via kernel evdev events."""
+        # Map config modifier names to (left_keycode, right_keycode) pairs
+        MODIFIER_MAP = {
+            'ctrl':  (ecodes.KEY_LEFTCTRL,  ecodes.KEY_RIGHTCTRL),
+            'shift': (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT),
+            'alt':   (ecodes.KEY_LEFTALT,   ecodes.KEY_RIGHTALT),
+            'meta':  (ecodes.KEY_LEFTMETA,  ecodes.KEY_RIGHTMETA),
+            'super': (ecodes.KEY_LEFTMETA,  ecodes.KEY_RIGHTMETA),
+        }
+
+        parts = [p.lower() for p in self.hotkey.split('+')]
+        modifier_pairs = []
+        main_keycode = None
+
+        for part in parts:
+            if part in MODIFIER_MAP:
+                modifier_pairs.append(MODIFIER_MAP[part])
+            else:
+                evdev_name = f'KEY_{part.upper()}'
+                code = getattr(ecodes, evdev_name, None)
+                if code is None:
+                    logger.error("Unknown key '%s' in hotkey '%s'", part, self.hotkey)
+                    return
+                main_keycode = code
+
+        if main_keycode is None:
+            logger.error("No main key found in hotkey: %s", self.hotkey)
+            return
+
+        all_modifier_codes = {code for pair in modifier_pairs for code in pair}
+
+        # Find readable keyboard devices
+        keyboards = []
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+                caps = dev.capabilities()
+                if ecodes.EV_KEY in caps and ecodes.KEY_A in caps[ecodes.EV_KEY]:
+                    keyboards.append(dev)
+            except PermissionError:
+                logger.warning(
+                    "No permission to read %s — add yourself to the 'input' group: "
+                    "sudo usermod -aG input $USER  (then log out and back in)", path
+                )
+            except Exception:
+                pass
+
+        if not keyboards:
+            logger.error(
+                "No keyboard devices accessible. "
+                "Add yourself to the 'input' group: sudo usermod -aG input $USER"
+            )
+            return
+
+        logger.info(
+            "Monitoring %d keyboard device(s) for hotkey: %s (evdev)",
+            len(keyboards), self.hotkey
+        )
+
+        modifier_state = set()
+
+        while True:
+            try:
+                # select() with timeout so we can react to new devices in future
+                rlist, _, _ = select.select(keyboards, [], [], 1.0)
+                for dev in rlist:
+                    for event in dev.read():
+                        if event.type != ecodes.EV_KEY:
+                            continue
+
+                        code = event.code
+                        state = event.value  # 0=up, 1=down, 2=auto-repeat
+
+                        # Track modifier keys
+                        if code in all_modifier_codes:
+                            if state > 0:
+                                modifier_state.add(code)
+                            else:
+                                modifier_state.discard(code)
+
+                        # Handle the main key (ignore auto-repeat — real up/down only)
+                        if code == main_keycode and state != 2:
+                            modifiers_ok = all(
+                                l in modifier_state or r in modifier_state
+                                for l, r in modifier_pairs
+                            )
+                            if state == 1 and modifiers_ok:
+                                self.hotkey_pressed = True
+                                with self._capture_lock:
+                                    capturing = self.is_capturing
+                                if not capturing:
+                                    self.start_capture()
+                            elif state == 0:
+                                # Stop on key-up regardless of current modifier state
+                                self.hotkey_pressed = False
+                                with self._capture_lock:
+                                    capturing = self.is_capturing
+                                if capturing:
+                                    self.stop_capture()
+            except Exception as e:
+                logger.error("Error in evdev event loop: %s", e)
+                time.sleep(0.1)
 
     def _resolve_keycode(self, key_name: str):
         """Resolve a key name to an X11 keycode using the actual keyboard layout."""
