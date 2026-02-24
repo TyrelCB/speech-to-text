@@ -99,36 +99,40 @@ class Overlay:
             self.root.geometry(f'+{screen_width//2 - 100}+{screen_height//2 - 50}')
 
     def update_state(self, state: str):
-        """Update overlay state with new text."""
+        """Thread-safe: schedule a label update on the Tk event loop."""
+        if self.root and self.is_running:
+            self.root.after(0, self._do_update_state, state)
+
+    def _do_update_state(self, state: str):
+        """Must only be called from the Tk thread (via root.after)."""
         if not self.root:
-            self.create_overlay()
-
-        # Update label text
+            return
         self.label.config(text=state)
-
-        # Show overlay if not visible
         with self._visibility_lock:
             already_visible = self.is_visible
             if not already_visible:
                 self.is_visible = True
         if not already_visible:
+            self.update_position()
             self.root.deiconify()
-            self.start_timeout()
+            self._start_timeout()
 
-    def start_timeout(self):
-        """Start timeout to auto-hide overlay."""
-        # Cancel existing timeout if any
+    def _start_timeout(self):
+        """Start auto-hide timer (called from Tk thread)."""
         if self.timeout_thread and self.timeout_thread.is_alive():
             return
-
-        # Start new timeout thread
         self.timeout_thread = threading.Thread(target=self._timeout_handler)
         self.timeout_thread.daemon = True
         self.timeout_thread.start()
 
     def _timeout_handler(self):
-        """Handle overlay timeout."""
+        """Sleep then schedule hide back on the Tk thread."""
         time.sleep(self.overlay_timeout)
+        if self.root and self.is_running:
+            self.root.after(0, self._do_hide)
+
+    def _do_hide(self):
+        """Must only be called from the Tk thread (via root.after)."""
         with self._visibility_lock:
             if self.is_visible:
                 self.is_visible = False
@@ -136,29 +140,33 @@ class Overlay:
 
     def start(self):
         """Start the overlay system."""
-        self.create_overlay()
         self.is_running = True
+        self._tk_ready = threading.Event()
 
-        # Start Tkinter main loop in separate thread
-        self.tk_thread = threading.Thread(target=self._run_tkinter)
+        # Tk must be created and driven entirely from one thread
+        self.tk_thread = threading.Thread(target=self._run_tkinter, name="tk-overlay")
         self.tk_thread.daemon = True
         self.tk_thread.start()
 
+        # Wait until the window is ready before returning
+        self._tk_ready.wait(timeout=5)
         logger.info("Overlay system started")
 
     def _run_tkinter(self):
-        """Run Tkinter main loop."""
+        """Create the Tk window and run its event loop — all in this thread."""
         try:
+            self.create_overlay()
+            self._tk_ready.set()
             self.root.mainloop()
         except Exception as e:
-            logger.error(f"Tkinter error: {e}")
+            logger.error("Tkinter error: %s", e)
+            self._tk_ready.set()  # unblock start() even on failure
 
     def stop(self):
         """Stop the overlay system."""
         self.is_running = False
         if self.root:
-            self.root.quit()
-            self.root.destroy()
+            self.root.after(0, self.root.quit)
         logger.info("Overlay system stopped")
 
     def set_overlay_callback(self, callback: callable):
