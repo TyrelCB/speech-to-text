@@ -1,5 +1,5 @@
 {
-  "hotkey": "Ctrl+Shift+M",
+  "hotkey": "Ctrl+space",
   "model_size": "small",
   "language": "en",
   "audio_chunk_duration": 5,

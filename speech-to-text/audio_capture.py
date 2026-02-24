@@ -118,20 +118,38 @@ class AudioCapture:
             self._xdisplay.flush()
             logger.info("Hotkey grabbed: %s (keycode %d)", self.hotkey, main_keycode)
 
+            # Debounce timer for stop: X11 key auto-repeat fires repeated
+            # KeyRelease+KeyPress pairs while a key is held.  We cancel any
+            # pending stop whenever a fresh KeyPress arrives within the window.
+            _AUTO_REPEAT_MS = 0.06   # 60 ms > typical repeat interval (~25 ms)
+            _stop_timer = None
+
+            def _schedule_stop():
+                nonlocal _stop_timer
+                if _stop_timer is not None:
+                    _stop_timer.cancel()
+                _stop_timer = threading.Timer(_AUTO_REPEAT_MS, self.stop_capture)
+                _stop_timer.start()
+
+            key_held = False
             while True:
                 event = self._xdisplay.next_event()
                 if event.type == X.KeyPress and event.detail == main_keycode:
-                    self.hotkey_pressed = True
-                    with self._capture_lock:
-                        capturing = self.is_capturing
-                    if not capturing:
-                        self.start_capture()
+                    # Cancel any pending debounced stop (auto-repeat case)
+                    if _stop_timer is not None:
+                        _stop_timer.cancel()
+                        _stop_timer = None
+                    if not key_held:
+                        key_held = True
+                        self.hotkey_pressed = True
+                        with self._capture_lock:
+                            capturing = self.is_capturing
+                        if not capturing:
+                            self.start_capture()
                 elif event.type == X.KeyRelease and event.detail == main_keycode:
+                    key_held = False
                     self.hotkey_pressed = False
-                    with self._capture_lock:
-                        capturing = self.is_capturing
-                    if capturing:
-                        self.stop_capture()
+                    _schedule_stop()
 
         except Exception as e:
             logger.error("Hotkey detection failed: %s", str(e))
@@ -163,14 +181,13 @@ class AudioCapture:
             logger.info("Starting audio capture...")
 
             self._stop_event.clear()
-            # Start PipeWire recording
-            # This will record to stdout
+            # Record raw s16le PCM to stdout (no WAV header to strip)
             self.process = subprocess.Popen([
                 'pw-record',
-                '--format', 'wav',
-                '--target', 'pipe:1',
+                '--format', 's16',
                 '--rate', str(self.config.get('audio_sample_rate', 16000)),
-                '--channels', str(self.config.get('audio_channels', 1))
+                '--channels', str(self.config.get('audio_channels', 1)),
+                '-'   # write to stdout
             ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
             self.is_capturing = True
@@ -207,6 +224,11 @@ class AudioCapture:
 
         except Exception as e:
             logger.error("Error processing audio: %s", str(e))
+        finally:
+            # Flush any remaining audio shorter than one full chunk
+            if buffer and self.callback:
+                logger.info("Flushing %d bytes of remaining audio", len(buffer))
+                self.callback(bytes(buffer))
 
     def stop_capture(self):
         """Stop audio capture."""
