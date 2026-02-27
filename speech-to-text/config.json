@@ -1,8 +1,10 @@
 {
-  "hotkey": "Ctrl+space",
+  "hotkey": "Ctrl+Space",
+  "hotkey_mode": "toggle",
   "model_size": "small",
   "language": "en",
   "audio_chunk_duration": 5,
+  "max_record_seconds": 600,
   "audio_sample_rate": 16000,
   "audio_channels": 1,
   "overlay_timeout": 3,

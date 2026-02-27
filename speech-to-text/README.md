@@ -4,7 +4,7 @@ A Linux speech-to-text engine that captures audio via hotkey and transcribes it 
 
 ## Features
 
-- Hotkey-activated microphone capture (Ctrl+Shift+M by default)
+- Hotkey-activated microphone capture (`hold` or `toggle` mode)
 - Real-time speech transcription using Whisper
 - System overlay with visual feedback
 - Text output at cursor location using xdotool
@@ -48,17 +48,19 @@ A Linux speech-to-text engine that captures audio via hotkey and transcribes it 
 
 Edit `config.json` to customize:
 - hotkey: The key combination to activate speech capture
+- hotkey_mode: `hold` (press-and-hold) or `toggle` (press once to start, again to stop)
 - model_size: Whisper model size (tiny, base, small, medium, large)
 - audio_chunk_duration: Duration of audio chunks for processing (seconds)
+- max_record_seconds: Maximum recording duration before auto-stop (seconds)
 - overlay_timeout: Time before overlay auto-hides (seconds)
 - audio_buffer_size: Size of audio buffer (samples)
 
 ## Usage
 
 1. Launch the application
-2. Hold down the hotkey (Ctrl+Shift+M by default)
+2. Press the hotkey (`Ctrl+Space` in the current config)
 3. Speak clearly into the microphone
-4. Release the hotkey to stop recording
+4. Press it again to stop recording (toggle mode) or release if using hold mode
 5. Transcribed text will appear at your cursor location
 
 ## Troubleshooting
