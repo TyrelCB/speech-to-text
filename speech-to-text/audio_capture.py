@@ -42,6 +42,8 @@ class AudioCapture:
         """Initialize audio capture with configuration."""
         self.config = config
         self.hotkey = config.get('hotkey', 'Ctrl+Shift+M')
+        self.hotkey_mode = str(config.get('hotkey_mode', 'hold')).lower()
+        self.max_record_seconds = config.get('max_record_seconds', 600)
         self.audio_buffer_size = config.get('audio_buffer_size', 1024)
         self._capture_lock = threading.Lock()
         self.is_capturing = False
@@ -53,7 +55,40 @@ class AudioCapture:
         self.xlib_available = xlib_available
         self.evdev_available = evdev_available
         self.level_callback: Optional[Callable[[float], None]] = None
+        self._session_buffer = bytearray()
+        self._max_record_timer: Optional[threading.Timer] = None
         self.setup_hotkey()
+
+    def _is_toggle_mode(self) -> bool:
+        """Return True when hotkey behavior should toggle capture on/off."""
+        return self.hotkey_mode == 'toggle'
+
+    def _handle_hotkey_press(self):
+        """Start capture on hold mode, or toggle capture on toggle mode."""
+        self.hotkey_pressed = True
+        with self._capture_lock:
+            capturing = self.is_capturing
+
+        if self._is_toggle_mode():
+            if capturing:
+                self.stop_capture()
+            else:
+                self.start_capture()
+            return
+
+        if not capturing:
+            self.start_capture()
+
+    def _handle_hotkey_release(self):
+        """Stop capture when using hold mode."""
+        self.hotkey_pressed = False
+        if self._is_toggle_mode():
+            return
+
+        with self._capture_lock:
+            capturing = self.is_capturing
+        if capturing:
+            self.stop_capture()
 
     def setup_hotkey(self):
         """Set up hotkey detection (evdev on Wayland, XGrabKey on X11)."""
@@ -157,14 +192,12 @@ class AudioCapture:
                         _stop_timer = None
                     if not key_held:
                         key_held = True
-                        self.hotkey_pressed = True
-                        with self._capture_lock:
-                            capturing = self.is_capturing
-                        if not capturing:
-                            self.start_capture()
+                        self._handle_hotkey_press()
                 elif event.type == X.KeyRelease and event.detail == main_keycode:
                     key_held = False
-                    self.hotkey_pressed = False
+                    if self._is_toggle_mode():
+                        self.hotkey_pressed = False
+                        continue
                     _schedule_stop()
 
         except Exception as e:
@@ -258,18 +291,9 @@ class AudioCapture:
                                 for l, r in modifier_pairs
                             )
                             if state == 1 and modifiers_ok:
-                                self.hotkey_pressed = True
-                                with self._capture_lock:
-                                    capturing = self.is_capturing
-                                if not capturing:
-                                    self.start_capture()
+                                self._handle_hotkey_press()
                             elif state == 0:
-                                # Stop on key-up regardless of current modifier state
-                                self.hotkey_pressed = False
-                                with self._capture_lock:
-                                    capturing = self.is_capturing
-                                if capturing:
-                                    self.stop_capture()
+                                self._handle_hotkey_release()
             except Exception as e:
                 logger.error("Error in evdev event loop: %s", e)
                 time.sleep(0.1)
@@ -301,6 +325,10 @@ class AudioCapture:
             logger.info("Starting audio capture...")
 
             self._stop_event.clear()
+            self._session_buffer.clear()
+            if self._max_record_timer is not None:
+                self._max_record_timer.cancel()
+                self._max_record_timer = None
             # Record raw s16le PCM to stdout (no WAV header to strip)
             self.process = subprocess.Popen([
                 'pw-record',
@@ -311,6 +339,12 @@ class AudioCapture:
             ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
             self.is_capturing = True
+            if self.max_record_seconds:
+                self._max_record_timer = threading.Timer(
+                    float(self.max_record_seconds), self._stop_due_to_max_length
+                )
+                self._max_record_timer.daemon = True
+                self._max_record_timer.start()
 
         # Start audio processing thread
         self.audio_thread = threading.Thread(target=self._process_audio)
@@ -319,26 +353,13 @@ class AudioCapture:
 
     def _process_audio(self):
         """Process audio data from PipeWire."""
-        buffer = bytearray()
-        chunk_bytes = (
-            self.config.get('audio_chunk_duration', 5)
-            * self.config.get('audio_sample_rate', 16000)
-            * 2  # 16-bit = 2 bytes per sample
-            * self.config.get('audio_channels', 1)
-        )
-
         try:
             while not self._stop_event.is_set() and self.process:
                 data = self.process.stdout.read(self.audio_buffer_size)
                 if data:
                     if self.level_callback:
                         self.level_callback(self._calculate_audio_level(data))
-                    buffer.extend(data)
-
-                    if len(buffer) >= chunk_bytes:
-                        if self.callback:
-                            self.callback(bytes(buffer))
-                        buffer.clear()
+                    self._session_buffer.extend(data)
 
                 # Check if process is still running
                 if self.process.poll() is not None:
@@ -347,10 +368,11 @@ class AudioCapture:
         except Exception as e:
             logger.error("Error processing audio: %s", str(e))
         finally:
-            # Flush any remaining audio shorter than one full chunk
-            if buffer and self.callback:
-                logger.info("Flushing %d bytes of remaining audio", len(buffer))
-                self.callback(bytes(buffer))
+            # Flush the full recording once per session to preserve long-form context.
+            if self._session_buffer and self.callback:
+                logger.info("Flushing %d bytes of recorded audio", len(self._session_buffer))
+                self.callback(bytes(self._session_buffer))
+                self._session_buffer.clear()
             if self.level_callback:
                 self.level_callback(0.0)
 
@@ -372,6 +394,9 @@ class AudioCapture:
                 return
             logger.info("Stopping audio capture...")
             self._stop_event.set()
+            if self._max_record_timer is not None:
+                self._max_record_timer.cancel()
+                self._max_record_timer = None
 
         # Stop the process
         if self.process:
@@ -387,6 +412,11 @@ class AudioCapture:
 
         with self._capture_lock:
             self.is_capturing = False
+
+    def _stop_due_to_max_length(self):
+        """Stop recording when the maximum configured duration is reached."""
+        logger.info("Max recording length reached (%ss), stopping capture", self.max_record_seconds)
+        self.stop_capture()
 
     def start(self):
         """Start the audio capture system."""

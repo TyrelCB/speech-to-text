@@ -96,7 +96,8 @@ def validate_config(config: dict):
         )
 
     for int_key in ('audio_chunk_duration', 'audio_sample_rate', 'audio_channels',
-                    'overlay_timeout', 'overlay_font_size', 'audio_buffer_size'):
+                    'overlay_timeout', 'overlay_font_size', 'audio_buffer_size',
+                    'max_record_seconds'):
         val = config.get(int_key)
         if val is not None and (not isinstance(val, int) or val <= 0):
             raise ValueError(f"Config key '{int_key}' must be a positive integer, got: {val!r}")
@@ -104,6 +105,12 @@ def validate_config(config: dict):
     hotkey = config.get('hotkey', '')
     if not isinstance(hotkey, str) or not hotkey:
         raise ValueError(f"Config key 'hotkey' must be a non-empty string, got: {hotkey!r}")
+
+    hotkey_mode = str(config.get('hotkey_mode', 'hold')).lower()
+    if hotkey_mode not in {'hold', 'toggle'}:
+        raise ValueError(
+            f"Config key 'hotkey_mode' must be 'hold' or 'toggle', got: {hotkey_mode!r}"
+        )
 
 
 def load_config():
@@ -116,8 +123,10 @@ def load_config():
         logger.error(f"Configuration file not found: {config_path}")
         return {
             "hotkey": "Ctrl+Shift+M",
+            "hotkey_mode": "hold",
             "model_size": "small",
             "audio_chunk_duration": 5,
+            "max_record_seconds": 600,
             "overlay_timeout": 3,
             "audio_buffer_size": 1024
         }

@@ -81,7 +81,11 @@ class SpeechRecognition:
             audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
 
             # Transcribe audio
-            result = self.model.transcribe(audio_array, language=self.config.get('language', 'en'))
+            result = self.model.transcribe(
+                audio_array,
+                language=self.config.get('language', 'en'),
+                condition_on_previous_text=False,
+            )
             text = result["text"].strip()
 
             # Update overlay state

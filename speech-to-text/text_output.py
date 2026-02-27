@@ -9,6 +9,7 @@ import logging
 import subprocess
 import os
 import sys
+import re
 from typing import Callable, Optional
 
 # Add the current directory to Python path
@@ -59,6 +60,10 @@ class TextOutput:
         """Format text with proper punctuation spacing and capitalization."""
         # Remove extra whitespace
         text = ' '.join(text.split())
+        # Collapse long ellipsis runs that Whisper sometimes emits on long dictation.
+        text = re.sub(r'\.{3,}', '.', text).strip()
+        if not text:
+            return ""
 
         # Capitalize first letter
         if text:

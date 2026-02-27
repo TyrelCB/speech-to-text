@@ -12,8 +12,10 @@ from main import validate_config
 def _base_config():
     return {
         'hotkey': 'Ctrl+Shift+M',
+        'hotkey_mode': 'hold',
         'model_size': 'small',
         'audio_chunk_duration': 5,
+        'max_record_seconds': 600,
         'audio_sample_rate': 16000,
         'audio_channels': 1,
         'overlay_timeout': 3,
@@ -54,6 +56,13 @@ def test_zero_chunk_duration_raises():
         validate_config(cfg)
 
 
+def test_zero_max_record_seconds_raises():
+    cfg = _base_config()
+    cfg['max_record_seconds'] = 0
+    with pytest.raises(ValueError, match="max_record_seconds"):
+        validate_config(cfg)
+
+
 def test_empty_hotkey_raises():
     cfg = _base_config()
     cfg['hotkey'] = ''
@@ -65,4 +74,11 @@ def test_non_string_hotkey_raises():
     cfg = _base_config()
     cfg['hotkey'] = 42
     with pytest.raises(ValueError, match="hotkey"):
+        validate_config(cfg)
+
+
+def test_invalid_hotkey_mode_raises():
+    cfg = _base_config()
+    cfg['hotkey_mode'] = 'tap'
+    with pytest.raises(ValueError, match="hotkey_mode"):
         validate_config(cfg)

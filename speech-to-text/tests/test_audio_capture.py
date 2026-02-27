@@ -48,12 +48,17 @@ def test_stop_capture_kills_on_timeout():
     assert mock_proc.wait.call_count == 2
 
 
-def test_process_audio_uses_bytearray():
-    """_process_audio internal buffer must use bytearray (not bytes concatenation)."""
+def test_session_buffer_is_bytearray():
+    """AudioCapture must store session audio in a bytearray for efficient buffering."""
+    ac = _make_capture()
+    assert isinstance(ac._session_buffer, bytearray)
+
+
+def test_process_audio_avoids_bytes_concat():
+    """_process_audio must avoid bytes += concatenation (O(n²) copies)."""
     import audio_capture
     import inspect
     src = inspect.getsource(audio_capture.AudioCapture._process_audio)
-    assert 'bytearray' in src, "_process_audio must use bytearray for efficient buffering"
     assert 'buffer +=' not in src, "_process_audio must not use bytes += (O(n²) copies)"
 
 
@@ -73,3 +78,17 @@ def test_calculate_audio_level_normalized():
     assert ac._calculate_audio_level((0).to_bytes(2, "little", signed=True)) == 0.0
     level = ac._calculate_audio_level((32767).to_bytes(2, "little", signed=True))
     assert 0.99 <= level <= 1.0
+
+
+def test_stop_capture_cancels_max_record_timer():
+    """stop_capture must cancel any active max-record timer."""
+    ac = _make_capture({'hotkey': 'Ctrl+Shift+M', 'audio_buffer_size': 1024, 'max_record_seconds': 600})
+    ac.is_capturing = True
+    ac.process = MagicMock()
+    timer = MagicMock()
+    ac._max_record_timer = timer
+
+    ac.stop_capture()
+
+    timer.cancel.assert_called_once()
+    assert ac._max_record_timer is None
