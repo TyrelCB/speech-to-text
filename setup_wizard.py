@@ -16,6 +16,8 @@ from app_config import DEFAULT_CONFIG, VALID_MODEL_SIZES, load_config
 
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_CONFIG_PATH = os.path.join(CONFIG_DIR, "config.local.json")
+MODEL_ORDER = ["tiny", "base", "small", "medium", "large"]
+MODEL_RANK = {name: index for index, name in enumerate(MODEL_ORDER)}
 
 
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
@@ -185,6 +187,48 @@ def benchmark_models(
     return results
 
 
+def recommend_model_from_benchmark(
+    results: list[dict[str, Any]], fallback_model: str
+) -> tuple[str, str | None]:
+    if not results:
+        return fallback_model, None
+
+    valid_results = [result for result in results if result["model_size"] in MODEL_RANK]
+    if not valid_results:
+        return fallback_model, None
+
+    fastest = min(result["transcribe_seconds"] for result in valid_results)
+    tolerance = max(0.05, fastest * 0.15)
+    eligible = [
+        result
+        for result in valid_results
+        if result["transcribe_seconds"] <= fastest + tolerance
+    ]
+    eligible.sort(
+        key=lambda result: (
+            MODEL_RANK[result["model_size"]],
+            -result["transcribe_seconds"],
+            -result["load_seconds"],
+        )
+    )
+    recommended = eligible[-1]
+    fastest_result = min(
+        valid_results,
+        key=lambda result: (result["transcribe_seconds"], MODEL_RANK[result["model_size"]]),
+    )
+
+    if recommended["model_size"] == fastest_result["model_size"]:
+        reason = "fastest transcription in the benchmark"
+    else:
+        delta = recommended["transcribe_seconds"] - fastest
+        reason = (
+            f"within {delta:.1f}s of the fastest result and a larger model "
+            f"than {fastest_result['model_size']}"
+        )
+
+    return recommended["model_size"], reason
+
+
 def run_benchmark(config: dict[str, Any], actual_device: str, default_model: str) -> str | None:
     if not shutil_which("pw-record"):
         print("Skipping benchmark: pw-record is not installed.")
@@ -230,7 +274,15 @@ def run_benchmark(config: dict[str, Any], actual_device: str, default_model: str
         print(f"     {preview}")
 
     choices = [result["model_size"] for result in results]
-    benchmark_default = default_model if default_model in choices else choices[0]
+    benchmark_default, reason = recommend_model_from_benchmark(results, default_model)
+    if benchmark_default not in choices:
+        benchmark_default = default_model if default_model in choices else choices[0]
+        reason = None
+
+    if reason:
+        print(f"\nRecommended from benchmark: {benchmark_default} ({reason})")
+    else:
+        print(f"\nRecommended from benchmark: {benchmark_default}")
     return prompt_choice("Choose the model to keep:", choices, benchmark_default)
 
 

@@ -24,7 +24,7 @@ The installer will:
 - clone or update the repo into `~/.local/share/speech-to-text`
 - create or refresh `.venv`
 - install PyTorch with an explicit backend instead of relying on the default PyPI `torch` wheel
-- offer an optional setup wizard to choose CPU/GPU preference and benchmark Whisper models
+- offer an optional setup wizard to choose CPU/GPU preference and benchmark Whisper models with a measured recommendation
 - create or update `~/.config/systemd/user/speech-to-text.service`
 - reload and enable the user service when `systemctl --user` is reachable
 
