@@ -23,6 +23,7 @@ The installer will:
 - install `uv` if it is missing
 - clone or update the repo into `~/.local/share/speech-to-text`
 - create or refresh `.venv`
+- install PyTorch with an explicit backend instead of relying on the default PyPI `torch` wheel
 - offer an optional setup wizard to choose CPU/GPU preference and benchmark Whisper models
 - create or update `~/.config/systemd/user/speech-to-text.service`
 - reload and enable the user service when `systemctl --user` is reachable
@@ -32,6 +33,13 @@ Optional overrides:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
   INSTALL_DIR="$HOME/speech-to-text" sh
+```
+
+Force a specific PyTorch backend during install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
+  TORCH_BACKEND=cu130 sh
 ```
 
 For unattended installs, skip the prompt explicitly:
@@ -50,13 +58,19 @@ If you prefer to install manually:
 
 2. Create and activate a virtual environment:
    ```bash
-   uv venv
+   uv venv --seed
    source .venv/bin/activate
    ```
 
 3. Install dependencies:
    ```bash
    uv pip install -r requirements.txt
+   uv pip install torch --torch-backend=auto
+   ```
+
+   On DGX Spark / GB10, prefer:
+   ```bash
+   uv pip install torch --torch-backend=cu130
    ```
 
 4. Install required system tools:

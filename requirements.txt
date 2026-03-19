@@ -1,5 +1,4 @@
 openai-whisper
 python-xlib
 numpy
-torch
 evdev
