@@ -5,10 +5,11 @@ Wants=graphical-session.target pipewire.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/tyrel/projects/speach-to-text/speech-to-text
+# Update this path to match where you cloned the repository
+WorkingDirectory=%h/speech-to-text
 # Guard startup until a graphical display socket is available.
 ExecStartPre=/bin/sh -lc 'test -n "$WAYLAND_DISPLAY" || test -n "$DISPLAY"'
-ExecStart=/home/tyrel/projects/speach-to-text/speech-to-text/.venv/bin/python /home/tyrel/projects/speach-to-text/speech-to-text/main.py
+ExecStart=%h/speech-to-text/.venv/bin/python %h/speech-to-text/main.py
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

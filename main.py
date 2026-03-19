@@ -65,7 +65,7 @@ def _check_wtype() -> bool:
         return True
     logger.warning(
         "wtype not found. Text output will not work on Wayland. "
-        "Install with: sudo dnf install wtype"
+        "Install wtype: sudo dnf install wtype  (Fedora) / sudo apt install wtype  (Debian/Ubuntu)"
     )
     return False
 
