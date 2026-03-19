@@ -17,6 +17,7 @@ env/
 .claude/
 .vscode/
 .idea/
+config.local.json
 
 # OS artifacts
 .DS_Store

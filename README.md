@@ -23,6 +23,7 @@ The installer will:
 - install `uv` if it is missing
 - clone or update the repo into `~/.local/share/speech-to-text`
 - create or refresh `.venv`
+- offer an optional setup wizard to choose CPU/GPU preference and benchmark Whisper models
 - create or update `~/.config/systemd/user/speech-to-text.service`
 - reload and enable the user service when `systemctl --user` is reachable
 
@@ -31,6 +32,13 @@ Optional overrides:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
   INSTALL_DIR="$HOME/speech-to-text" sh
+```
+
+For unattended installs, skip the prompt explicitly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
+  INTERACTIVE_SETUP=never sh
 ```
 
 If you prefer to install manually:
@@ -78,10 +86,19 @@ Edit `config.json` to customize:
 - hotkey: The key combination to activate speech capture
 - hotkey_mode: `hold` (press-and-hold) or `toggle` (press once to start, again to stop)
 - model_size: Whisper model size (tiny, base, small, medium, large)
+- device_preference: `auto`, `cpu`, or `gpu`
 - audio_chunk_duration: Duration of audio chunks for processing (seconds)
 - max_record_seconds: Maximum recording duration before auto-stop (seconds)
 - overlay_timeout: Time before overlay auto-hides (seconds)
 - audio_buffer_size: Size of audio buffer (samples)
+
+Prefer putting machine-specific overrides in `config.local.json`. The installer setup wizard writes `model_size` and `device_preference` there so future `git pull` updates can still fast-forward cleanly.
+
+You can rerun the setup wizard later with:
+
+```bash
+.venv/bin/python setup_wizard.py
+```
 
 ## Usage
 

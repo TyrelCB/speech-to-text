@@ -2,6 +2,7 @@
   "hotkey": "Ctrl+Space",
   "hotkey_mode": "toggle",
   "model_size": "small",
+  "device_preference": "auto",
   "language": "en",
   "audio_chunk_duration": 5,
   "max_record_seconds": 600,

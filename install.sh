@@ -9,6 +9,7 @@ SERVICE_NAME="speech-to-text.service"
 SKIP_SYSTEM_PACKAGES="${SKIP_SYSTEM_PACKAGES:-0}"
 SKIP_PYTHON_DEPS="${SKIP_PYTHON_DEPS:-0}"
 SKIP_SERVICE_ENABLE="${SKIP_SERVICE_ENABLE:-0}"
+INTERACTIVE_SETUP="${INTERACTIVE_SETUP:-auto}"
 
 log() {
     printf '%s\n' "$*"
@@ -153,6 +154,33 @@ install_python_dependencies() {
     uv pip install --python "$INSTALL_DIR/.venv/bin/python" -r "$INSTALL_DIR/requirements.txt"
 }
 
+run_interactive_setup() {
+    if [ "$INTERACTIVE_SETUP" = "never" ]; then
+        log "Skipping interactive setup"
+        return
+    fi
+
+    if [ "$SKIP_PYTHON_DEPS" = "1" ]; then
+        log "Skipping interactive setup: Python dependencies were skipped"
+        return
+    fi
+
+    if [ ! -x "$INSTALL_DIR/.venv/bin/python" ] || [ ! -f "$INSTALL_DIR/setup_wizard.py" ]; then
+        log "Skipping interactive setup: setup wizard is unavailable"
+        return
+    fi
+
+    if [ "$INTERACTIVE_SETUP" != "always" ] && { [ ! -t 1 ] || [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; }; then
+        log "Skipping interactive setup: no interactive terminal detected"
+        return
+    fi
+
+    log "Launching optional setup wizard"
+    if ! "$INSTALL_DIR/.venv/bin/python" "$INSTALL_DIR/setup_wizard.py" </dev/tty >/dev/tty 2>/dev/tty; then
+        log "warning: setup wizard exited early; keeping existing config"
+    fi
+}
+
 check_runtime_commands() {
     missing=""
 
@@ -223,10 +251,27 @@ enable_service() {
         return
     fi
 
-    if ! systemctl --user enable --now "$SERVICE_NAME"; then
-        log "warning: service file updated, but enable/start failed"
+    if ! systemctl --user enable "$SERVICE_NAME"; then
+        log "warning: service file updated, but enabling the service failed"
         log "Check the user session and run:"
-        log "  systemctl --user enable --now $SERVICE_NAME"
+        log "  systemctl --user enable $SERVICE_NAME"
+        return
+    fi
+
+    if systemctl --user is-active --quiet "$SERVICE_NAME"; then
+        if ! systemctl --user restart "$SERVICE_NAME"; then
+            log "warning: service file updated, but restart failed"
+            log "Check logs with:"
+            log "  journalctl --user -u $SERVICE_NAME -f"
+            return
+        fi
+        return
+    fi
+
+    if ! systemctl --user start "$SERVICE_NAME"; then
+        log "warning: service file updated, but start failed"
+        log "Check the user session and run:"
+        log "  systemctl --user start $SERVICE_NAME"
         return
     fi
 }
@@ -237,6 +282,7 @@ main() {
     ensure_uv
     clone_or_update_repo
     install_python_dependencies
+    run_interactive_setup
     check_runtime_commands
     write_service_file
     enable_service

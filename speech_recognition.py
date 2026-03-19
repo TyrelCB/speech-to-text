@@ -26,6 +26,17 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def resolve_torch_device(device_preference: str, cuda_available: bool) -> str:
+    """Map config preference to the actual Torch device string."""
+    normalized = str(device_preference).lower()
+    if normalized == "cpu":
+        return "cpu"
+    if normalized == "gpu":
+        return "cuda" if cuda_available else "cpu"
+    return "cuda" if cuda_available else "cpu"
+
+
 class SpeechRecognition:
     """Handles speech recognition using Whisper."""
 
@@ -33,10 +44,14 @@ class SpeechRecognition:
         """Initialize speech recognition with configuration."""
         self.config = config
         self.model_size = config.get('model_size', 'small')
+        self.device_preference = str(config.get('device_preference', 'auto')).lower()
         self.callback: Optional[Callable] = None
         self.overlay_callback: Optional[Callable] = None
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        cuda_available = torch.cuda.is_available()
+        self.device = resolve_torch_device(self.device_preference, cuda_available)
+        if self.device_preference == "gpu" and not cuda_available:
+            logger.warning("GPU was requested but CUDA is unavailable; falling back to CPU")
         self.whisper_available = whisper_available
         if not self.whisper_available:
             logger.error("Whisper is not available. Speech recognition will not work.")
@@ -49,7 +64,12 @@ class SpeechRecognition:
             logger.error("Cannot load Whisper model: library not available")
             return
 
-        logger.info(f"Loading Whisper {self.model_size} model on {self.device}...")
+        logger.info(
+            "Loading Whisper %s model on %s (preference: %s)...",
+            self.model_size,
+            self.device,
+            self.device_preference,
+        )
         try:
             self.model = whisper.load_model(self.model_size, device=self.device)
             logger.info(f"Whisper {self.model_size} model loaded successfully")
