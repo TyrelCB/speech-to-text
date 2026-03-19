@@ -11,14 +11,33 @@ A Linux speech-to-text engine that captures audio via hotkey and transcribes it 
 
 ## Installation
 
+Install or update everything with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | sh
+```
+
+The installer will:
+
+- install the supported system packages it needs (`git`, `python`, `xdotool`, `wtype`, PipeWire tools, Tk)
+- install `uv` if it is missing
+- clone or update the repo into `~/.local/share/speech-to-text`
+- create or refresh `.venv`
+- create or update `~/.config/systemd/user/speech-to-text.service`
+- reload and enable the user service when `systemctl --user` is reachable
+
+Optional overrides:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
+  INSTALL_DIR="$HOME/speech-to-text" sh
+```
+
+If you prefer to install manually:
+
 1. Install uv (Python package manager):
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-   Or if you prefer using pip:
-   ```bash
-   pip install uv
    ```
 
 2. Create and activate a virtual environment:
@@ -32,26 +51,21 @@ A Linux speech-to-text engine that captures audio via hotkey and transcribes it 
    uv pip install -r requirements.txt
    ```
 
-   Note: The openai-whisper package has been installed with the latest version (20250625) instead of the specific version 20231106 specified in requirements.txt, as the latest version resolves build issues and provides improved compatibility.
-
-4. Ensure required system tools are installed:
+4. Install required system tools:
 
    **Fedora/RHEL:**
    ```bash
-   sudo dnf install xdotool
+   sudo dnf install xdotool wtype pipewire-utils python3-tkinter
    ```
    **Debian/Ubuntu:**
    ```bash
-   sudo apt install xdotool
+   sudo apt install xdotool wtype pipewire-bin python3-tk
    ```
+   If `pipewire-bin` is unavailable on your release, install `pipewire` instead.
    **Arch Linux:**
    ```bash
-   sudo pacman -S xdotool
+   sudo pacman -S xdotool wtype pipewire tk
    ```
-
-   On Wayland, install `wtype` instead of (or in addition to) `xdotool`:
-
-   **Fedora/RHEL:** `sudo dnf install wtype` | **Debian/Ubuntu:** `sudo apt install wtype` | **Arch:** `sudo pacman -S wtype`
 
 5. Run the application:
    ```bash
@@ -85,11 +99,13 @@ Edit `config.json` to customize:
 
 ## Run as a systemd user service
 
-1. Copy the unit file and update the path to match your clone location:
+The installer already creates or updates the unit file for you. If you want to manage it manually:
+
+1. Copy the unit file and update the path if you did not install to `~/.local/share/speech-to-text`:
    ```bash
    mkdir -p ~/.config/systemd/user
    cp speech-to-text.service ~/.config/systemd/user/
-   # The service file uses %h (your home dir) + ~/speech-to-text as the default path.
+   # The service file uses %h/.local/share/speech-to-text by default.
    # Edit the file if you cloned the repo elsewhere:
    # WorkingDirectory=%h/your/path/to/speech-to-text
    # ExecStart=%h/your/path/to/speech-to-text/.venv/bin/python %h/your/path/to/speech-to-text/main.py

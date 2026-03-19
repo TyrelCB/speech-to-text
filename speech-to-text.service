@@ -2,17 +2,17 @@
 Description=Speech-to-Text Engine
 After=graphical-session.target pipewire.service
 Wants=graphical-session.target pipewire.service
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
-# Update this path to match where you cloned the repository
-WorkingDirectory=%h/speech-to-text
+WorkingDirectory=%h/.local/share/speech-to-text
 # Guard startup until a graphical display socket is available.
 ExecStartPre=/bin/sh -lc 'test -n "$WAYLAND_DISPLAY" || test -n "$DISPLAY"'
-ExecStart=%h/speech-to-text/.venv/bin/python %h/speech-to-text/main.py
+ExecStart=%h/.local/share/speech-to-text/.venv/bin/python %h/.local/share/speech-to-text/main.py
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target
