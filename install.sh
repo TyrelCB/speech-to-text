@@ -197,7 +197,12 @@ resolve_torch_backend() {
         return
     fi
 
-    printf '%s\n' 'auto'
+    if has_nvidia_gpu_hint; then
+        printf '%s\n' 'auto'
+    else
+        log "No NVIDIA GPU detected; installing CPU-only PyTorch"
+        printf '%s\n' 'cpu'
+    fi
 }
 
 verify_torch_install() {
