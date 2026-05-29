@@ -1,0 +1,11 @@
+[Unit]
+Description=Speech-to-Text MCP Server
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/tyrel/projects/speech-to-text/mcp_server.py --http --port 8100
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
