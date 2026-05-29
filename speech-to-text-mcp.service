@@ -3,7 +3,7 @@ Description=Speech-to-Text MCP Server
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/tyrel/projects/speech-to-text/mcp_server.py --http --port 8100
+ExecStart=/usr/bin/python3 /home/tyrel/projects/speech-to-text/mcp_server.py --http --port 8100 --idle-timeout 60
 Restart=on-failure
 RestartSec=5
 
