@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import gc
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +13,9 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("speech-to-text")
 
 _model_cache: dict = {}
+_last_used: float = 0.0
+_cache_lock = threading.Lock()
+_idle_timeout: int = 300  # seconds; 0 = never unload
 
 VALID_MODELS = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}
 
@@ -17,10 +23,30 @@ VALID_MODELS = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v
 def _get_model(model_size: str):
     from faster_whisper import WhisperModel
 
+    global _last_used
     key = (model_size, "cpu", "int8")
-    if key not in _model_cache:
-        _model_cache[key] = WhisperModel(model_size, device="cpu", compute_type="int8")
-    return _model_cache[key]
+    with _cache_lock:
+        if key not in _model_cache:
+            _model_cache[key] = WhisperModel(model_size, device="cpu", compute_type="int8")
+        _last_used = time.monotonic()
+        return _model_cache[key]
+
+
+def _start_idle_watchdog(timeout: int) -> None:
+    if timeout <= 0:
+        return
+
+    def _watchdog():
+        while True:
+            time.sleep(30)
+            with _cache_lock:
+                if _model_cache and time.monotonic() - _last_used > timeout:
+                    _model_cache.clear()
+                    gc.collect()
+                    print(f"[idle] Model unloaded after {timeout}s idle", flush=True)
+
+    t = threading.Thread(target=_watchdog, daemon=True)
+    t.start()
 
 
 def _extract_audio_to_wav(input_path: Path, tmp_dir: str) -> Path:
@@ -153,14 +179,25 @@ def _find_free_port(start: int = 8100) -> int:
     raise RuntimeError("No free port found in range")
 
 
+def _arg(name: str) -> Optional[str]:
+    import sys
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+
+
 if __name__ == "__main__":
     import sys
+
+    idle_timeout = int(_arg("--idle-timeout") or 300)
+    _idle_timeout = idle_timeout
+    _start_idle_watchdog(idle_timeout)
+    if idle_timeout:
+        print(f"[idle] Model will be unloaded after {idle_timeout}s idle", flush=True)
+
     if "--http" in sys.argv:
         import uvicorn
         from starlette.middleware.cors import CORSMiddleware
 
-        port_arg = sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else None
-        port = int(port_arg) if port_arg else _find_free_port()
+        port = int(_arg("--port") or _find_free_port())
 
         mcp.settings.streamable_http_path = "/sse"
         mcp.settings.stateless_http = True
