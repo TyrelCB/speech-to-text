@@ -10,6 +10,7 @@ MCP server that transcribes audio and video files using [faster-whisper](https:/
 - Optional transcript prompt to guide Whisper's output
 - Configurable model size (tiny → large-v3)
 - stdio and HTTP/SSE modes
+- Idle timeout: automatically unloads the model from memory after inactivity
 
 ## Requirements
 
@@ -42,9 +43,12 @@ python3 mcp_server.py
 ```bash
 python3 mcp_server.py --http
 python3 mcp_server.py --http --port 8100
+python3 mcp_server.py --http --port 8100 --idle-timeout 60
 ```
 
 The server exposes an SSE endpoint at `http://localhost:<port>/sse`.
+
+**`--idle-timeout <seconds>`** — unload the Whisper model from memory after this many seconds of inactivity (default: `300`). The model reloads automatically on the next request. Pass `0` to disable.
 
 ### systemd (start at boot)
 
