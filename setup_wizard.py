@@ -54,18 +54,30 @@ def prompt_choice(prompt: str, options: list[str], default: str) -> str:
 
 def detect_runtime_gpu() -> tuple[bool, str | None]:
     try:
-        import torch
+        import ctranslate2
     except ImportError:
         return False, None
 
-    if not torch.cuda.is_available():
+    try:
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return False, None
+    except Exception:
         return False, None
 
-    device_name = None
+    # CTranslate2 does not expose the device name; query nvidia-smi if present.
+    device_name = "CUDA GPU"
     try:
-        device_name = torch.cuda.get_device_name(0)
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        first_line = result.stdout.strip().splitlines()
+        if result.returncode == 0 and first_line:
+            device_name = first_line[0].strip()
     except Exception:
-        device_name = "CUDA GPU"
+        pass
     return True, device_name
 
 
@@ -147,28 +159,27 @@ def benchmark_models(
     audio_data: bytes, models: list[str], device: str, language: str
 ) -> list[dict[str, Any]]:
     import numpy as np
-    import whisper
+    from faster_whisper import WhisperModel
 
-    try:
-        import torch
-    except ImportError:
-        torch = None
+    from speech_recognition import compute_type_for_device
 
+    compute_type = compute_type_for_device(device)
     audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
     results: list[dict[str, Any]] = []
 
     for model_name in models:
-        print(f"\nBenchmarking model '{model_name}' on {device}...")
+        print(f"\nBenchmarking model '{model_name}' on {device} ({compute_type})...")
         load_start = time.perf_counter()
-        model = whisper.load_model(model_name, device=device)
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
         load_elapsed = time.perf_counter() - load_start
 
         transcribe_start = time.perf_counter()
-        result = model.transcribe(
+        segments, _info = model.transcribe(
             audio_array,
             language=language,
             condition_on_previous_text=False,
         )
+        text = "".join(segment.text for segment in segments).strip()
         transcribe_elapsed = time.perf_counter() - transcribe_start
 
         results.append(
@@ -176,13 +187,11 @@ def benchmark_models(
                 "model_size": model_name,
                 "load_seconds": load_elapsed,
                 "transcribe_seconds": transcribe_elapsed,
-                "text": result.get("text", "").strip(),
+                "text": text,
             }
         )
 
         del model
-        if torch is not None and device == "cuda":
-            torch.cuda.empty_cache()
 
     return results
 
@@ -307,7 +316,7 @@ def main() -> int:
     print("Speech-to-Text setup")
     print("")
     if gpu_available:
-        print(f"GPU detected and usable by Torch: {gpu_name}")
+        print(f"GPU detected and usable by CTranslate2: {gpu_name}")
         device_options = ["auto", "gpu", "cpu"]
         device_default = (
             existing_device_preference
@@ -320,7 +329,7 @@ def main() -> int:
             device_default,
         )
     else:
-        print("No Torch-usable GPU detected. Speech recognition will run on CPU.")
+        print("No CUDA GPU detected. Speech recognition will run on CPU.")
         device_preference = "cpu"
 
     actual_device = resolve_device(device_preference, gpu_available)

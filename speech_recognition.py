@@ -1,34 +1,43 @@
 """
 Speech recognition module for the Speech-to-Text Engine.
 
-This module uses Whisper (OpenAI) for speech recognition and processes audio chunks
-in real-time.
+This module uses faster-whisper (CTranslate2 backend) for speech recognition and
+processes audio chunks in real-time.
 """
 
 import logging
 import os
 import sys
 import numpy as np
-import torch
 from typing import Callable, Optional
 
 # Add the current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import Whisper
+# Import faster-whisper
 try:
-    import whisper
+    from faster_whisper import WhisperModel
     whisper_available = True
 except ImportError:
-    logging.error("Whisper library not installed. Please install openai-whisper package.")
+    logging.error("faster-whisper not installed. Please install the faster-whisper package.")
     whisper_available = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def resolve_torch_device(device_preference: str, cuda_available: bool) -> str:
-    """Map config preference to the actual Torch device string."""
+def cuda_device_count() -> int:
+    """Return the number of CUDA devices visible to CTranslate2, or 0."""
+    try:
+        import ctranslate2
+
+        return ctranslate2.get_cuda_device_count()
+    except Exception:
+        return 0
+
+
+def resolve_device(device_preference: str, cuda_available: bool) -> str:
+    """Map config preference to the actual CTranslate2 device string."""
     normalized = str(device_preference).lower()
     if normalized == "cpu":
         return "cpu"
@@ -37,8 +46,13 @@ def resolve_torch_device(device_preference: str, cuda_available: bool) -> str:
     return "cuda" if cuda_available else "cpu"
 
 
+def compute_type_for_device(device: str) -> str:
+    """Pick a memory-efficient compute type for the resolved device."""
+    return "float16" if device == "cuda" else "int8"
+
+
 class SpeechRecognition:
-    """Handles speech recognition using Whisper."""
+    """Handles speech recognition using faster-whisper."""
 
     def __init__(self, config: dict):
         """Initialize speech recognition with configuration."""
@@ -48,39 +62,58 @@ class SpeechRecognition:
         self.callback: Optional[Callable] = None
         self.overlay_callback: Optional[Callable] = None
         self.model = None
-        cuda_available = torch.cuda.is_available()
-        self.device = resolve_torch_device(self.device_preference, cuda_available)
+        cuda_available = cuda_device_count() > 0
+        self.device = resolve_device(self.device_preference, cuda_available)
+        self.compute_type = compute_type_for_device(self.device)
         if self.device_preference == "gpu" and not cuda_available:
-            logger.warning("GPU was requested but CUDA is unavailable; falling back to CPU")
+            logger.warning("GPU was requested but no CUDA device is available; falling back to CPU")
         self.whisper_available = whisper_available
         if not self.whisper_available:
-            logger.error("Whisper is not available. Speech recognition will not work.")
+            logger.error("faster-whisper is not available. Speech recognition will not work.")
             return
         self.load_model()
 
     def load_model(self):
-        """Load Whisper model."""
+        """Load the faster-whisper model."""
         if not self.whisper_available:
-            logger.error("Cannot load Whisper model: library not available")
+            logger.error("Cannot load model: faster-whisper not available")
             return
 
         logger.info(
-            "Loading Whisper %s model on %s (preference: %s)...",
+            "Loading Whisper %s model on %s (compute_type=%s, preference: %s)...",
             self.model_size,
             self.device,
+            self.compute_type,
             self.device_preference,
         )
         try:
-            self.model = whisper.load_model(self.model_size, device=self.device)
+            # Prefer the locally cached weights so a running service never
+            # depends on network access. On the very first run the model is not
+            # cached yet, so fall back to downloading it once.
+            try:
+                self.model = WhisperModel(
+                    self.model_size,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    local_files_only=True,
+                )
+            except Exception:
+                logger.info("Model not cached locally; downloading %s once...", self.model_size)
+                self.model = WhisperModel(
+                    self.model_size,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    local_files_only=False,
+                )
             logger.info(f"Whisper {self.model_size} model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             raise
 
     def process_audio(self, audio_data: bytes):
-        """Process audio data using Whisper."""
+        """Process audio data using faster-whisper."""
         if not self.whisper_available:
-            logger.error("Cannot process audio: Whisper library not available")
+            logger.error("Cannot process audio: faster-whisper not available")
             if self.overlay_callback:
                 self.overlay_callback("Error: Whisper not available")
             return
@@ -100,13 +133,14 @@ class SpeechRecognition:
             # Audio is 16-bit mono at 16kHz
             audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
 
-            # Transcribe audio
-            result = self.model.transcribe(
+            # Transcribe audio. faster-whisper returns a generator of segments
+            # that is consumed lazily, so we join their text.
+            segments, _info = self.model.transcribe(
                 audio_array,
                 language=self.config.get('language', 'en'),
                 condition_on_previous_text=False,
             )
-            text = result["text"].strip()
+            text = "".join(segment.text for segment in segments).strip()
 
             # Update overlay state
             if self.overlay_callback:

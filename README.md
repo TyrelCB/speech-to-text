@@ -5,7 +5,7 @@ A Linux speech-to-text engine that captures audio via hotkey and transcribes it 
 ## Features
 
 - Hotkey-activated microphone capture (`hold` or `toggle` mode)
-- Real-time speech transcription using Whisper
+- Real-time speech transcription using faster-whisper (CTranslate2)
 - System overlay with visual feedback
 - Text output at cursor location using xdotool
 
@@ -23,7 +23,7 @@ The installer will:
 - install `uv` if it is missing
 - clone or update the repo into `~/.local/share/speech-to-text`
 - create or refresh `.venv`
-- install PyTorch with an explicit backend instead of relying on the default PyPI `torch` wheel
+- install the Python dependencies (faster-whisper and friends)
 - offer an optional setup wizard to choose CPU/GPU preference and benchmark Whisper models with a measured recommendation
 - create or update `~/.config/systemd/user/speech-to-text.service`
 - reload and enable the user service when `systemctl --user` is reachable
@@ -33,13 +33,6 @@ Optional overrides:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
   INSTALL_DIR="$HOME/speech-to-text" sh
-```
-
-Force a specific PyTorch backend during install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TyrelCB/speech-to-text/master/install.sh | \
-  TORCH_BACKEND=cu130 sh
 ```
 
 For unattended installs, skip the prompt explicitly:
@@ -65,13 +58,11 @@ If you prefer to install manually:
 3. Install dependencies:
    ```bash
    uv pip install -r requirements.txt
-   uv pip install torch --torch-backend=auto
    ```
 
-   On DGX Spark / GB10, prefer:
-   ```bash
-   uv pip install torch --torch-backend=cu130
-   ```
+   faster-whisper runs on the CPU by default. GPU acceleration requires a
+   CUDA-enabled CTranslate2 build (available for x86_64; not published for
+   aarch64 on PyPI), plus the matching cuBLAS/cuDNN libraries.
 
 4. Install required system tools:
 
