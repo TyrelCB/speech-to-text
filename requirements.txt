@@ -2,3 +2,5 @@ faster-whisper
 python-xlib
 numpy
 evdev
+mcp
+uvicorn
