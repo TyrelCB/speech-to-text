@@ -201,6 +201,13 @@ if __name__ == "__main__":
 
         mcp.settings.streamable_http_path = "/sse"
         mcp.settings.stateless_http = True
+        # FastMCP defaults host to 127.0.0.1 and auto-enables DNS-rebinding
+        # protection with an allowlist of only localhost/127.0.0.1/::1 Host
+        # headers. We bind the socket to 0.0.0.0 below, so relax this too —
+        # otherwise requests via any other hostname get 421 Invalid Host header.
+        mcp.settings.transport_security.enable_dns_rebinding_protection = False
+        mcp.settings.transport_security.allowed_hosts = ["*"]
+        mcp.settings.transport_security.allowed_origins = ["*"]
 
         app = CORSMiddleware(
             mcp.streamable_http_app(),
